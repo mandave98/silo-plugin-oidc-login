@@ -1,0 +1,80 @@
+name: Bump Silo plugin SDK
+
+# Manual button for "new Silo version": bumps github.com/Silo-Server/silo-plugin-sdk,
+# tidies modules, proves it still compiles, and opens a PR. Merging the PR triggers
+# the build-and-publish workflow, which makes the new build visible to Silo via the catalog.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sdk_version:
+        description: "SDK version to pin (e.g. v0.17.0). Leave empty for the latest tag."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    env:
+      GOOS: linux
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve target version
+        id: target
+        run: |
+          v="${{ inputs.sdk_version }}"
+          if [ -z "$v" ]; then
+            v=$(git ls-remote --tags https://github.com/Silo-Server/silo-plugin-sdk.git \
+                | awk -F/ '{print $NF}' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          fi
+          cur=$(grep -E 'github.com/Silo-Server/silo-plugin-sdk ' go.mod | awk '{print $2}')
+          echo "current=$cur target=$v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "current=$cur" >> "$GITHUB_OUTPUT"
+
+      - name: Bump and tidy
+        run: |
+          go get github.com/Silo-Server/silo-plugin-sdk@${{ steps.target.outputs.version }}
+          go mod tidy
+          git diff --stat
+
+      - name: Build against the new SDK
+        run: make build
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.target.outputs.version }}
+          CUR: ${{ steps.target.outputs.current }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "bump/sdk-${V}"
+          git add go.mod go.sum
+          if git diff --cached --quiet; then echo "already at ${V}"; exit 0; fi
+          git commit -m "deps: silo-plugin-sdk ${CUR} -> ${V}"
+          git push -f origin "bump/sdk-${V}"
+          gh pr create --base main --head "bump/sdk-${V}" \
+            --title "deps: silo-plugin-sdk ${CUR} -> ${V}" \
+            --body "Automated bump. Build against ${V} passed in this run. Merging triggers a release and catalog update." \
+            || echo "PR already open"
