@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # The Silo plugin SDK is what moves with Silo releases; a merged bump triggers a build.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      silo-sdk:
+        patterns:
+          - "github.com/Silo-Server/silo-plugin-sdk"
+      go-deps:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "github.com/Silo-Server/silo-plugin-sdk"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

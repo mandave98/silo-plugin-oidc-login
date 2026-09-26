@@ -1,0 +1,129 @@
+name: Build and publish
+
+# Fork-local replacement for upstream's release.yml (which depends on a private reusable
+# workflow). Every push to main:
+#   1. stamps the embedded manifest version as <major>.<minor>.<run_number> so each build is
+#      a monotonically newer version Silo will offer as an update,
+#   2. builds the web assets and the linux-amd64 binary,
+#   3. cuts a release v<version> with plugin-linux-amd64 + checksums.txt (same layout as the
+#      first-party Silo catalog),
+#   4. rewrites manifest.json on the `catalog` branch so Silo can install/update from
+#      https://raw.githubusercontent.com/<owner>/<repo>/catalog/manifest.json
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-publish
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GOOS: linux
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stamp version
+        id: ver
+        run: |
+          base=$(python3 -c "import json;print(json.load(open('cmd/silo-plugin-oidc-login/manifest.json'))['version'])")
+          mm=$(echo "$base" | cut -d. -f1-2)
+          version="${mm}.${{ github.run_number }}"
+          python3 - "$version" <<'PY'
+          import json, sys
+          p = "cmd/silo-plugin-oidc-login/manifest.json"
+          m = json.load(open(p)); m["version"] = sys.argv[1]
+          json.dump(m, open(p, "w"), indent=2); open(p, "a").write("\n")
+          PY
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "stamped $base -> $version"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build (web assets, then Go binary with embedded dist)
+        run: make build
+
+      - name: Package like the first-party catalog
+        run: |
+          mkdir -p dist
+          cp silo-plugin-oidc-login dist/plugin-linux-amd64
+          (cd dist && sha256sum plugin-linux-amd64 > checksums.txt && cat checksums.txt)
+          file dist/plugin-linux-amd64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-linux-amd64-v${{ steps.ver.outputs.version }}
+          path: dist/*
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: v${{ steps.ver.outputs.version }}
+          body: |
+            linux-amd64 build of ${{ github.sha }}.
+            Silo installs this through the catalog branch manifest; manual fallback is
+            Admin > Plugins > Upload with plugin-linux-amd64.
+          files: |
+            dist/plugin-linux-amd64
+            dist/checksums.txt
+
+      - name: Write catalog manifest
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          repo = os.environ["REPO"]; ver = os.environ["VERSION"]
+          m = json.load(open("cmd/silo-plugin-oidc-login/manifest.json"))
+          m.pop("checksum", None)  # the binary computes its own at runtime
+          m["supported_platforms"] = [{"os": "linux", "arch": "amd64"}]
+          m.setdefault("presentation", {
+              "display_name": "OIDC Login",
+              "summary": "Sign in with any OpenID Connect provider (authentik, Keycloak, Auth0, ...).",
+              "homepage_url": f"https://github.com/{repo}",
+              "license_spdx": "AGPL-3.0-or-later",
+          })
+          rel = f"https://github.com/{repo}/releases/download/v{ver}"
+          catalog = {"plugins": [{
+              "manifest": m,
+              "repo_url": f"https://github.com/{repo}",
+              "checksums_url": f"{rel}/checksums.txt",
+              "binaries": {"linux/amd64": {"url": f"{rel}/plugin-linux-amd64"}},
+          }]}
+          json.dump(catalog, open("/tmp/manifest.json", "w"), indent=2); open("/tmp/manifest.json", "a").write("\n")
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin catalog >/dev/null; then
+            git fetch origin catalog && git checkout catalog
+          else
+            git checkout --orphan catalog && git rm -rfq . && git clean -fdxq
+          fi
+          cp /tmp/manifest.json manifest.json
+          git add manifest.json
+          git commit -m "catalog: v${VERSION} (${GITHUB_SHA::7})" || echo "no catalog change"
+          git push origin catalog

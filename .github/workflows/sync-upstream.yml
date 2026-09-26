@@ -1,0 +1,38 @@
+name: Sync upstream
+
+# Weekly merge of RXWatcher/silo-plugin-oidc-login main into this fork's main.
+# A clean merge pushes and triggers the build; a conflict fails the run (email) and
+# leaves main untouched, so drift is never silent.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"   # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream/main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/RXWatcher/silo-plugin-oidc-login.git
+          git fetch upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "already up to date with upstream"; exit 0
+          fi
+          # upstream's release.yml points at a private reusable workflow; keep it deleted here.
+          git merge --no-edit upstream/main || {
+            git status --short
+            echo "::error::merge conflict with upstream; resolve manually"; exit 1; }
+          git rm -q --ignore-unmatch .github/workflows/release.yml
+          git diff --cached --quiet || git commit -q -m "sync: drop upstream release.yml after merge"
+          git push origin HEAD:main
