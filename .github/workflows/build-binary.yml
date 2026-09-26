@@ -98,8 +98,11 @@ jobs:
           python3 - <<'PY'
           import json, os
           repo = os.environ["REPO"]; ver = os.environ["VERSION"]
-          m = json.load(open("cmd/silo-plugin-oidc-login/manifest.json"))
-          m.pop("checksum", None)  # the binary computes its own at runtime
+          full = json.load(open("cmd/silo-plugin-oidc-login/manifest.json"))
+          # The catalog index is discovery-only. Silo decodes it with encoding/json, and runtime
+          # fields like global_config_schema (enum strings in admin_form) and http_routes break
+          # that decode; the binary's embedded manifest supplies them at install time.
+          m = {k: full[k] for k in ("plugin_id", "version", "silo_api_version", "capabilities", "presentation") if k in full}
           m["supported_platforms"] = [{"os": "linux", "arch": "amd64"}]
           m.setdefault("presentation", {
               "display_name": "OIDC Login",
