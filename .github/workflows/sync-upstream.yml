@@ -1,6 +1,6 @@
 name: Sync upstream
 
-# Weekly merge of RXWatcher/silo-plugin-oidc-login main into this fork's main.
+# Weekly merge of RXWatcher/silo-plugin-oidc-login main into this fork.
 # A clean merge opens a pull request; nothing is built or published until a human merges
 # it. A conflict fails the run (email) and leaves main untouched, so drift is never silent.
 
@@ -30,22 +30,29 @@ jobs:
           git remote add upstream https://github.com/RXWatcher/silo-plugin-oidc-login.git
           git fetch upstream main
           if git merge-base --is-ancestor upstream/main HEAD; then
-            echo "already up to date with upstream"; exit 0
+            echo "already up to date with upstream"
+            exit 0
           fi
           up=$(git rev-parse --short upstream/main)
           branch="sync/upstream-${up}"
           git checkout -b "$branch"
           # upstream's release.yml points at a private reusable workflow; keep it deleted here.
-          git merge --no-edit upstream/main || {
+          if ! git merge --no-edit upstream/main; then
             git status --short
-            echo "::error::merge conflict with upstream ${up}; resolve manually on branch ${branch}"; exit 1; }
+            echo "::error::merge conflict with upstream ${up}; resolve manually on branch ${branch}"
+            exit 1
+          fi
           git rm -q --ignore-unmatch .github/workflows/release.yml
           git diff --cached --quiet || git commit -q -m "sync: drop upstream release.yml after merge"
           git push -f origin "$branch"
           # Nothing reaches main, and therefore nothing is built or published, until a human merges this.
-          gh pr create --base main --head "$branch"             --title "sync: upstream ${up}"             --body "$(printf 'Weekly upstream sync of RXWatcher/silo-plugin-oidc-login@%s.
-
-Review the diff before merging: merging publishes a release and Silo auto-installs it.
-
-Upstream log:
-%s' "$up" "$(git log --oneline HEAD~1..upstream/main | head -30)")"             || echo "PR already open for ${branch}"
+          {
+            echo "Weekly upstream sync of RXWatcher/silo-plugin-oidc-login@${up}."
+            echo
+            echo "Review the diff before merging: merging publishes a release and Silo auto-installs it."
+            echo
+            echo "Upstream log:"
+            git log --oneline "HEAD~1..upstream/main" | head -30
+          } > /tmp/pr-body.md
+          gh pr create --base main --head "$branch" --title "sync: upstream ${up}" --body-file /tmp/pr-body.md \
+            || echo "PR already open for ${branch}"
