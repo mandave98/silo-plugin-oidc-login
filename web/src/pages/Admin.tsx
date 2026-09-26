@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, installationID, hostApiPrefix } from "@/lib/api";
+import { api, installationID, hostApiPrefix, HostAuthError } from "@/lib/api";
 import SettingsForm, { type SettingsState } from "@/components/SettingsForm";
 import ClaimFilterEditor, {
   type ClaimFilter,
@@ -95,7 +95,8 @@ export default function Admin() {
       }
       await api.patch("/api/v1/admin/config", body);
       const id = installationID();
-      if (id) {
+      if (!id) return { bindingSynced: false };
+      try {
         await api.hostPut(`${hostApiPrefix()}/admin/plugins/installations/${id}/auth-binding`, {
           capability_id: "oidc",
           enabled: true,
@@ -105,12 +106,26 @@ export default function Admin() {
           display_name: settings.display_name.trim(),
           icon_url_path: settings.icon_url_path.trim(),
         });
+        return { bindingSynced: true };
+      } catch (e) {
+        // The plugin config is already saved. On current hosts the plugin page has no host
+        // session, so the login-button binding (created at install) is managed in Silo's
+        // own Admin > Plugins page instead of from here.
+        if (e instanceof HostAuthError) return { bindingSynced: false };
+        throw e;
       }
     },
-    onSuccess: () => {
+    onSuccess: ({ bindingSynced }) => {
       qc.invalidateQueries({ queryKey: ["config-summary"] });
       qc.invalidateQueries({ queryKey: ["config-summary-for-brand"] });
-      toast.success("Saved");
+      if (bindingSynced) {
+        toast.success("Saved");
+      } else {
+        toast.success("Saved", {
+          description:
+            "Login button name and icon are managed under Silo Admin > Plugins on this host.",
+        });
+      }
       setSettings((s) => ({ ...s, client_secret: "" }));
     },
     onError: (e: Error) => toast.error(e.message),

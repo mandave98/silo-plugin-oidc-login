@@ -21,6 +21,13 @@ export function hostApiPrefix(): string {
   return currentMount()?.hostApi ?? "/api/v1";
 }
 
+export class HostAuthError extends Error {
+  constructor(path: string) {
+    super(`host rejected ${path}: authentication required`);
+    this.name = "HostAuthError";
+  }
+}
+
 function authHeaders(): Record<string, string> {
   const t = getCachedToken();
   return t ? { Authorization: `Bearer ${t}` } : {};
@@ -52,12 +59,23 @@ export const api = {
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
     }).then(jsonOrThrow<T>),
-  hostPut: <T>(path: string, body: unknown): Promise<T> =>
-    fetch(path, {
+  // Host-owned endpoint (not proxied to the plugin). The plugin-launch token only
+  // authorises the plugin proxy on current hosts, so try the browser's host session
+  // first and fall back to the bearer for older hosts that accepted it.
+  hostPut: async <T>(path: string, body: unknown): Promise<T> => {
+    const init = (headers: Record<string, string>): RequestInit => ({
       method: "PUT",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body),
-    }).then(jsonOrThrow<T>),
+    });
+    let r = await fetch(path, init({}));
+    if (r.status === 401 && getCachedToken()) {
+      r = await fetch(path, init(authHeaders()));
+    }
+    if (r.status === 401) throw new HostAuthError(path);
+    return jsonOrThrow<T>(r);
+  },
   delete: <T>(path: string): Promise<T> =>
     fetch(mountPath() + path, {
       method: "DELETE",
