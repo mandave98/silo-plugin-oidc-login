@@ -118,12 +118,16 @@ jobs:
           PY
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Separate worktree: the main checkout has the stamped manifest and build output.
           if git ls-remote --exit-code --heads origin catalog >/dev/null; then
-            git fetch origin catalog && git checkout catalog
+            git fetch origin catalog
+            git worktree add /tmp/catalog origin/catalog
           else
-            git checkout --orphan catalog && git rm -rfq . && git clean -fdxq
+            git worktree add --detach /tmp/catalog
+            (cd /tmp/catalog && git checkout --orphan catalog && git rm -rfq . && git clean -fdxq)
           fi
-          cp /tmp/manifest.json manifest.json
+          cp /tmp/manifest.json /tmp/catalog/manifest.json
+          cd /tmp/catalog
           git add manifest.json
           git commit -m "catalog: v${VERSION} (${GITHUB_SHA::7})" || echo "no catalog change"
-          git push origin catalog
+          git push origin HEAD:catalog
