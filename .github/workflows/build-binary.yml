@@ -62,13 +62,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Tests (Go + web)
-        run: |
-          cd web && pnpm install --frozen-lockfile && cd ..
-          make test
-
       - name: Build (web assets, then Go binary with embedded dist)
         run: make build
+
+      # After build: the Go package embeds web/dist, so tests need the bundle to exist.
+      - name: Tests (Go + web)
+        run: make test
 
       - name: Package like the first-party catalog
         run: |
