@@ -6,6 +6,7 @@
 // active silo theme.
 
 import { api } from "./api";
+import { currentMount } from "./mount";
 
 let cachedToken: string | null = null;
 let cachedTheme: string | null = null;
@@ -58,8 +59,7 @@ export function currentUser(): (Identity & { isAdmin: boolean }) | null {
 }
 
 export function installID(): string {
-  const m = window.location.pathname.match(/^\/api\/v1\/plugins\/(\d+)/);
-  return m ? m[1] : "";
+  return currentMount()?.installationID ?? "";
 }
 
 // Exposed for tests only.

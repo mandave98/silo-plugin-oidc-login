@@ -2,19 +2,23 @@
 // mounted under /api/v1/plugins/{installId}/...
 
 import { getCachedToken } from "./identity";
+import { currentMount } from "./mount";
 
 export function mountPath(): string {
-  // The plugin SPA is served under /api/v1/plugins/{installationId}/admin/...
-  // We derive the prefix at runtime since the install ID is host-assigned.
-  const m = window.location.pathname.match(/^(\/api\/v1\/plugins\/\d+)/);
-  return m ? m[1] : "";
+  // Derived at runtime from the page URL; see lib/mount.ts for the prefixes.
+  return currentMount()?.prefix ?? "";
 }
 
 export function installationID(): number | null {
-  const m = mountPath().match(/\/api\/v1\/plugins\/(\d+)$/);
-  if (!m?.[1]) return null;
-  const id = Number(m[1]);
+  const raw = currentMount()?.installationID;
+  if (!raw) return null;
+  const id = Number(raw);
   return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+// Prefix for host-owned endpoints (not proxied to the plugin), matching the mount's API version.
+export function hostApiPrefix(): string {
+  return currentMount()?.hostApi ?? "/api/v1";
 }
 
 function authHeaders(): Record<string, string> {

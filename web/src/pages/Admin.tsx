@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, installationID } from "@/lib/api";
+import { api, installationID, hostApiPrefix } from "@/lib/api";
 import SettingsForm, { type SettingsState } from "@/components/SettingsForm";
 import ClaimFilterEditor, {
   type ClaimFilter,
@@ -96,7 +96,7 @@ export default function Admin() {
       await api.patch("/api/v1/admin/config", body);
       const id = installationID();
       if (id) {
-        await api.hostPut(`/api/v1/admin/plugins/installations/${id}/auth-binding`, {
+        await api.hostPut(`${hostApiPrefix()}/admin/plugins/installations/${id}/auth-binding`, {
           capability_id: "oidc",
           enabled: true,
           display_order: 100,

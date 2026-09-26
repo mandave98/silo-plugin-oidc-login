@@ -62,6 +62,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Tests (Go + web)
+        run: |
+          cd web && pnpm install --frozen-lockfile && cd ..
+          make test
+
       - name: Build (web assets, then Go binary with embedded dist)
         run: make build
 
